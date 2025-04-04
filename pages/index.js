@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { tomorrow as syntaxStyle } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 /**
- * 将 GitHub API 返回的平面数组构建为树形结构数据
- * @param {Array} flatList - GitHub API 返回的含 file/tree 对象的数组
- * @returns {Array} 嵌套的树形数据结构
+ * 将 GitHub API 返回的平面列表构建为树形结构
+ * @param {Array} flatList - GitHub API 返回的数组，包含 file/tree 对象
+ * @returns {Array} 树形结构数据
  */
 function buildTree(flatList) {
   const tree = [];
@@ -21,7 +25,7 @@ function buildTree(flatList) {
       if (map[parentPath]) {
         map[parentPath].children.push(item);
       } else {
-        // 找不到父节点则归为顶级节点（异常数据）
+        // 找不到父节点时归为顶级节点（异常数据）
         tree.push(item);
       }
     }
@@ -32,57 +36,60 @@ function buildTree(flatList) {
 
 /**
  * 递归组件：展示文件夹/文件节点
- * 新增 initialPath 参数，用于判断当前节点是否应自动展开
+ * Props:
+ * - node: 当前节点数据
+ * - onFileSelect: 当文件被点击时触发回调
+ * - initialPath: 初始展开路径设置（字符串，仓库根后子目录路径）
+ * - selectedPath: 当前选中的文件的完整路径
  */
-function TreeNode({ node, onFileSelect, initialPath }) {
-  // 判断是否需要自动展开：
-  // 如果 initialPath 存在，并且该节点为文件夹且 node.path 与 initialPath 匹配（同等或为前缀），则默认展开
+function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
+  // 自动展开：如果 initialPath 存在且当前节点为文件夹，并且 initialPath 与当前节点匹配或以其为前缀
   const shouldExpand =
     initialPath &&
     node.type === 'tree' &&
     (initialPath === node.path || initialPath.startsWith(node.path + '/'));
-    
   const [expanded, setExpanded] = useState(!!shouldExpand);
-  
-  // 如果当前文件夹正好与初始路径匹配，则使用高亮样式
+
+  // 当节点正好与初始路径精确匹配时（初始展开状态下）
   const isHighlighted = node.type === 'tree' && initialPath === node.path;
+  // 如果当前节点为文件，并且其路径和选中路径匹配，标记选中状态
+  const isSelected = node.type === 'blob' && selectedPath === node.path;
 
   const handleClick = () => {
     if (node.type === 'tree') {
       setExpanded(!expanded);
     } else if (node.type === 'blob') {
-      // 文件节点点击时调用文件选择回调
       onFileSelect && onFileSelect(node);
     }
   };
 
+  // 复合样式：支持选中高亮和初始展开高亮效果
+  const nodeStyle = {
+    cursor: 'pointer',
+    userSelect: 'none',
+    backgroundColor: isSelected ? '#f0f8ff' : isHighlighted ? '#ffffe0' : 'transparent',
+    borderLeft: isSelected ? '3px solid #0070f3' : 'none',
+    padding: '4px 8px',
+    borderRadius: '4px',
+    margin: '2px 0',
+  };
+
   return (
     <div style={{ marginLeft: '20px' }}>
-      <div
-        onClick={handleClick}
-        style={{
-          cursor: 'pointer',
-          userSelect: 'none',
-          backgroundColor: isHighlighted ? '#ffffe0' : 'inherit',
-          padding: '2px 4px'
-        }}
-      >
+      <div onClick={handleClick} style={nodeStyle}>
         {node.children && node.children.length > 0
           ? expanded
             ? '[-] '
             : '[+] '
           : '    '}
-        {node.type === 'tree' ? '📁' : '📄'}{' '}
-        {node.path.split('/').pop()}
+        {node.type === 'tree' ? '📁' : '📄'} {node.path.split('/').pop()}
       </div>
       {expanded &&
         node.children &&
         node.children
           .sort((a, b) => {
-            // 文件夹优先显示，其次按名称排序
-            if (a.type === b.type) {
-              return a.path.localeCompare(b.path);
-            }
+            // 文件夹优先、按名称排序
+            if (a.type === b.type) return a.path.localeCompare(b.path);
             return a.type === 'tree' ? -1 : 1;
           })
           .map((child) => (
@@ -91,6 +98,7 @@ function TreeNode({ node, onFileSelect, initialPath }) {
               node={child}
               onFileSelect={onFileSelect}
               initialPath={initialPath}
+              selectedPath={selectedPath}
             />
           ))}
     </div>
@@ -99,11 +107,11 @@ function TreeNode({ node, onFileSelect, initialPath }) {
 
 /**
  * 主页面组件
- * Props 包含：
- * - treeData：构建好的仓库文件树
- * - owner, repo, defaultBranch：仓库信息
- * - initialPath：希望初始展开的子目录路径（相对仓库根路径）
- * - error：错误信息
+ * Props:
+ * - treeData: 仓库文件树数据
+ * - owner, repo, defaultBranch: 仓库基本信息
+ * - initialPath: 用户配置的初始展开子目录路径（仓库根后的路径）
+ * - error: 错误信息（如果有的话）
  */
 export default function Home({
   treeData,
@@ -113,13 +121,33 @@ export default function Home({
   error,
   initialPath,
 }) {
-  // 用于存储当前选中的文件路径、预览内容及加载状态
   const [selectedPath, setSelectedPath] = useState(null);
   const [preview, setPreview] = useState('');
   const [loadingPreview, setLoadingPreview] = useState(false);
+  // 控制左侧面板宽度（初始300px，最小150px）
+  const [leftPanelWidth, setLeftPanelWidth] = useState(300);
+
+  // 拖拽分隔条逻辑
+  const handleMouseDown = (e) => {
+    const startX = e.clientX;
+    const startWidth = leftPanelWidth;
+
+    const onMouseMove = (e) => {
+      const delta = e.clientX - startX;
+      setLeftPanelWidth(Math.max(150, startWidth + delta));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
 
   /**
-   * 处理文件选择：点击文件后调用 API 路由获取文件预览内容
+   * 处理文件选择，调用 API 路由获取文件预览内容
    */
   const handleFileSelect = async (file) => {
     if (file.type !== 'blob') return;
@@ -128,9 +156,7 @@ export default function Home({
     setPreview('');
     try {
       const res = await fetch(
-        `/api/preview?path=${encodeURIComponent(
-          file.path
-        )}&ref=${defaultBranch}`
+        `/api/preview?path=${encodeURIComponent(file.path)}&ref=${defaultBranch}`
       );
       if (!res.ok) {
         const errText = await res.text();
@@ -147,31 +173,57 @@ export default function Home({
 
   if (error) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'sans-serif' }}>
+      <div style={{ padding: '20px', fontFamily: 'Segoe UI, sans-serif' }}>
         <h1>加载仓库数据错误</h1>
         <p>{error}</p>
       </div>
     );
   }
 
+  // 判断是否为 Markdown 文件
+  const isMarkdown =
+    selectedPath && selectedPath.toLowerCase().endsWith('.md');
+
+  // Markdown 中代码块处理组件
+  const markdownComponents = {
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline && match ? (
+        <SyntaxHighlighter style={syntaxStyle} language={match[1]} PreTag="div" {...props}>
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      ) : (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+  };
+
   return (
     <div
       style={{
         display: 'flex',
         height: '100vh',
-        fontFamily: 'sans-serif',
+        fontFamily: 'Segoe UI, Arial, sans-serif',
+        background: '#f5f7fa',
       }}
     >
-      {/* 左侧：文件树区域 */}
+      {/* 左侧：文件树面板 */}
       <div
         style={{
-          flex: '1',
-          overflow: 'auto',
+          width: leftPanelWidth,
+          minWidth: 150,
+          background: '#fff',
+          overflowY: 'auto',
           padding: '20px',
           borderRight: '1px solid #ddd',
+          boxShadow: '2px 0 5px rgba(0,0,0,0.1)',
         }}
       >
-        <h2>仓库文件树</h2>
+        <h2 style={{ borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+          仓库文件树
+        </h2>
         {treeData && treeData.length > 0 ? (
           treeData.map((node) => (
             <TreeNode
@@ -179,17 +231,42 @@ export default function Home({
               node={node}
               onFileSelect={handleFileSelect}
               initialPath={initialPath}
+              selectedPath={selectedPath}
             />
           ))
         ) : (
           <p>没有目录数据可显示。</p>
         )}
       </div>
-      {/* 右侧：文件预览区域 */}
-      <div style={{ flex: '2', overflow: 'auto', padding: '20px' }}>
-        <h2>预览 {selectedPath ? `- ${selectedPath}` : '（未选择文件）'}</h2>
+
+      {/* 分隔条（拖拽调整宽度） */}
+      <div
+        style={{
+          width: '5px',
+          cursor: 'col-resize',
+          backgroundColor: '#ddd',
+        }}
+        onMouseDown={handleMouseDown}
+      />
+
+      {/* 右侧：预览面板 */}
+      <div
+        style={{
+          flex: 1,
+          background: '#fff',
+          overflowY: 'auto',
+          padding: '20px',
+        }}
+      >
+        <h2 style={{ borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+          预览 {selectedPath ? `- ${selectedPath}` : '（未选择文件）'}
+        </h2>
         {loadingPreview ? (
           <p>加载预览…</p>
+        ) : isMarkdown ? (
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {preview}
+          </ReactMarkdown>
         ) : (
           <pre style={{ whiteSpace: 'pre-wrap' }}>{preview}</pre>
         )}
@@ -199,15 +276,15 @@ export default function Home({
 }
 
 /**
- * getServerSideProps 在服务端调用 GitHub API 获取仓库信息及完整树结构
- * 同时解析环境变量 GITHUB_ROUTE 支持初始路径设置：
- *  - 格式为 "owner/repo" 或 "owner/repo/child/folder"，多出的部分作为初始展开路径。
+ * getServerSideProps
+ * - 从环境变量读取 GITHUB_USER_TOKEN 与 GITHUB_ROUTE（可追加初始路径）
+ * - 获取仓库信息、默认分支及完整文件树，并转换为树形结构数据
+ * - 若 GITHUB_ROUTE 格式为 "owner/repo/child/folder"，则剩余部分作为初始展开路径
  */
 export async function getServerSideProps() {
-  // 从环境变量中读取 GitHub 用户令牌和路径设置
   const githubUserToken = process.env.GITHUB_USER_TOKEN;
   const githubRoute = process.env.GITHUB_ROUTE; // 格式："owner/repo" 或 "owner/repo/child/folder"
-  
+
   if (!githubUserToken || !githubRoute) {
     return {
       props: {
@@ -225,7 +302,6 @@ export async function getServerSideProps() {
     };
   }
 
-  // 前两个部分为仓库拥有者和仓库名称，多余部分作为初始展开路径
   const owner = routeParts[0];
   const repo = routeParts[1];
   const initialPath = routeParts.length > 2 ? routeParts.slice(2).join('/') : '';
@@ -236,11 +312,8 @@ export async function getServerSideProps() {
   };
 
   try {
-    // ① 获取仓库基本信息（获取默认分支）
-    const repoResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}`,
-      { headers }
-    );
+    // ① 获取仓库基本信息（默认分支）
+    const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
     if (!repoResponse.ok) {
       const errorData = await repoResponse.json();
       return {
@@ -250,7 +323,7 @@ export async function getServerSideProps() {
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || 'main';
 
-    // ② 获取分支信息，获得树对象的 SHA 值
+    // ② 获取分支信息以得到树对象 SHA
     const branchResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/branches/${defaultBranch}`,
       { headers }
@@ -258,15 +331,13 @@ export async function getServerSideProps() {
     if (!branchResponse.ok) {
       const errorData = await branchResponse.json();
       return {
-        props: {
-          error: errorData.message || '无法获取分支信息',
-        },
+        props: { error: errorData.message || '无法获取分支信息' },
       };
     }
     const branchData = await branchResponse.json();
     const treeSha = branchData.commit.commit.tree.sha;
 
-    // ③ 获取仓库完整的文件树（recursive=1 为递归获取所有目录和文件）
+    // ③ 获取仓库完整文件树（递归获取所有目录和文件）
     const treeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
       { headers }
@@ -274,17 +345,11 @@ export async function getServerSideProps() {
     if (!treeResponse.ok) {
       const errorData = await treeResponse.json();
       return {
-        props: {
-          error: errorData.message || '无法获取树结构数据',
-        },
+        props: { error: errorData.message || '无法获取树结构数据' },
       };
     }
     const treeDataJson = await treeResponse.json();
-
-    // 过滤无效数据，并构建树形结构
-    const treeItems = treeDataJson.tree.filter(
-      (item) => item.path && item.mode
-    );
+    const treeItems = treeDataJson.tree.filter((item) => item.path && item.mode);
     const tree = buildTree(treeItems);
 
     return {
