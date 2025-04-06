@@ -1,18 +1,37 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkBreaks from "remark-breaks";
 import Editor from "react-simple-code-editor";
 import Prism from "prismjs";
-import { tomorrow as syntaxStyle } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { marked } from "marked";
 import TurndownService from "turndown";
 
-// 加载 Prism 的 Markdown 支持（如果需要其他语言，可在此扩展）
+// 加载 Prism 语言支持（这里加载 Markdown）
 import "prismjs/components/prism-markdown";
 
-/**
- * 将 GitHub API 返回的平面列表构建为嵌套树形结构数据
- */
+// 自定义的 Markdown 代码块组件，用于代码高亮
+const MarkdownComponents = {
+  code({ node, inline, className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className || "");
+    return !inline && match ? (
+      <pre className="p-2 bg-gray-100 rounded overflow-x-auto">
+        <code>
+          {Prism.highlight(
+            String(children).replace(/\n$/, ""),
+            Prism.languages.markdown,
+            "markdown"
+          )}
+        </code>
+      </pre>
+    ) : (
+      <code className="bg-gray-100 p-1 rounded" {...props}>
+        {children}
+      </code>
+    );
+  },
+};
+
 function buildTree(flatList) {
   const tree = [];
   const map = {};
@@ -35,18 +54,13 @@ function buildTree(flatList) {
   return tree;
 }
 
-/**
- * 文件树递归显示组件
- */
 function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
   const shouldExpand =
     initialPath &&
     node.type === "tree" &&
     (initialPath === node.path || initialPath.startsWith(node.path + "/"));
   const [expanded, setExpanded] = useState(!!shouldExpand);
-  const isHighlighted = node.type === "tree" && initialPath === node.path;
   const isSelected = node.type === "blob" && selectedPath === node.path;
-
   const handleClick = () => {
     if (node.type === "tree") {
       setExpanded(!expanded);
@@ -54,12 +68,13 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
       onFileSelect && onFileSelect(node);
     }
   };
-
   return (
-    <div className="tree-node">
+    <div className="ml-2">
       <div
         onClick={handleClick}
-        className={`node-label ${isSelected ? "selected" : ""}`}
+        className={`cursor-pointer px-2 py-1 rounded hover:bg-blue-100 ${
+          isSelected ? "bg-blue-200 border-l-4 border-blue-500" : ""
+        }`}
       >
         {node.children && node.children.length > 0
           ? expanded
@@ -88,9 +103,6 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
   );
 }
 
-/**
- * 主页面组件
- */
 export default function Home({
   treeData,
   owner,
@@ -99,33 +111,29 @@ export default function Home({
   error,
   initialPath,
 }) {
-  // 预览/文件选择状态
   const [selectedPath, setSelectedPath] = useState(null);
   const [preview, setPreview] = useState("");
   const [previewMeta, setPreviewMeta] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
 
-  // 编辑相关状态
+  // 编辑状态
   const [isEditing, setIsEditing] = useState(false);
-  const [editorMode, setEditorMode] = useState("source"); // "source" or "visual"
+  const [editorMode, setEditorMode] = useState("source");
   const [editContent, setEditContent] = useState("");
   const [fileSha, setFileSha] = useState(null);
   const [saving, setSaving] = useState(false);
-  // 用于新建文件/文件夹的弹窗
   const [showNewModal, setShowNewModal] = useState(false);
-  const [newType, setNewType] = useState(null); // "file" 或 "folder"
+  const [newType, setNewType] = useState(null);
   const [newName, setNewName] = useState("");
-  // 提交按钮模态框
   const [showCommitModal, setShowCommitModal] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
 
-  // 编辑器引用（用于代码编辑模式）
+  // 编辑器引用
   const editorRef = useRef(null);
-  // 用于所见即所得编辑下引用
   const visualRef = useRef(null);
+  const [toolbarVisible, setToolbarVisible] = useState(false);
 
-  // 调整左侧面板宽度的拖拽逻辑
   const handleMouseDown = (e) => {
     const startX = e.clientX;
     const startWidth = leftPanelWidth;
@@ -141,7 +149,6 @@ export default function Home({
     document.addEventListener("mouseup", onMouseUp);
   };
 
-  // 从 GitHub 获取选中文件的预览（进入预览模式，不进入编辑）
   const handleFileSelect = async (file) => {
     if (file.type !== "blob") return;
     setSelectedPath(file.path);
@@ -167,7 +174,6 @@ export default function Home({
     setIsEditing(false);
   };
 
-  // 进入编辑模式（仅对文本文件生效）
   const handleEdit = async () => {
     if (!selectedPath) return;
     setLoadingPreview(true);
@@ -197,13 +203,10 @@ export default function Home({
     setLoadingPreview(false);
   };
 
-  // 切换编辑模式
   const toggleEditorMode = () => {
     if (editorMode === "source") {
-      // 切换到所见即所得：通过 marked 将 Markdown 转为 HTML
       setEditorMode("visual");
     } else {
-      // 切换回源代码编辑：使用 Turndown 将所见即所得内容转换回 Markdown
       if (visualRef.current) {
         const tdService = new TurndownService();
         const markdown = tdService.turndown(visualRef.current.innerHTML);
@@ -213,7 +216,14 @@ export default function Home({
     }
   };
 
-  // 源代码编辑时闪现工具栏（当按“/”键时显示），处理工具栏命令
+  const handleKeyDown = (e) => {
+    if (e.key === "/") {
+      setToolbarVisible(true);
+    } else if (e.key === "Escape") {
+      setToolbarVisible(false);
+    }
+  };
+
   const handleToolbarCommand = (cmd) => {
     let snippet = "";
     switch (cmd) {
@@ -224,7 +234,7 @@ export default function Home({
         snippet = "*斜体*";
         break;
       case "link":
-        snippet = "[链接文本](http://example.com)";
+        snippet = "[链接](http://example.com)";
         break;
       case "code":
         snippet = "`代码`";
@@ -235,10 +245,10 @@ export default function Home({
       default:
         break;
     }
-    setEditContent(editContent + snippet);
+    setEditContent((prev) => prev + snippet);
+    setToolbarVisible(false);
   };
 
-  // 提交更新，调用 /api/save 接口
   const handleCommit = async () => {
     if (!commitMsg) {
       alert("请输入提交信息");
@@ -264,7 +274,6 @@ export default function Home({
         alert("提交成功！");
         setIsEditing(false);
         setShowCommitModal(false);
-        // 重新加载预览
         handleFileSelect({ path: selectedPath, type: "blob" });
       }
     } catch (e) {
@@ -273,43 +282,72 @@ export default function Home({
     setSaving(false);
   };
 
-  // 新建文件或文件夹（此处仅为 UI 展示，后端实现请自行扩展）
-  const handleNew = async () => {
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent("");
+    setCommitMsg("");
+    setFileSha(null);
+  };
+
+  const handleNew = () => {
     if (!newName) {
       alert("请输入名称");
       return;
     }
-    // 此处调用新建 API ，目前仅为示例
     alert(`${newType === "file" ? "新建文件" : "新建文件夹"}：${newName} 功能待实现`);
     setShowNewModal(false);
     setNewName("");
-    // 刷新文件树（请根据实际情况更新 treeData）
   };
 
+  // 仅允许文本文件编辑
+  const canEdit = previewMeta && !previewMeta.isBinary && !previewMeta.isImage;
+  const isMarkdownFile =
+    selectedPath &&
+    selectedPath.toLowerCase().endsWith(".md") &&
+    canEdit;
+
   return (
-    <div className="app">
+    <div className="min-h-screen flex flex-col">
       {/* 顶部工具栏 */}
-      <div className="topbar">
-        <div className="topbar-left">
-          <button onClick={() => { setNewType("file"); setShowNewModal(true); }}>
+      <div className="topbar fixed top-0 inset-x-0 h-12 bg-white border-b border-gray-200 flex justify-between items-center px-4 z-50">
+        <div className="space-x-2">
+          <button
+            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+            onClick={() => {
+              setNewType("file");
+              setShowNewModal(true);
+            }}
+          >
             新建文件
           </button>
-          <button onClick={() => { setNewType("folder"); setShowNewModal(true); }}>
+          <button
+            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+            onClick={() => {
+              setNewType("folder");
+              setShowNewModal(true);
+            }}
+          >
             新建文件夹
           </button>
         </div>
-        <div className="topbar-right">
-          {isEditing && (
-            <button onClick={() => setShowCommitModal(true)}>提交到 GitHub</button>
-          )}
-        </div>
+        {isEditing && (
+          <button
+            className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+            onClick={() => setShowCommitModal(true)}
+          >
+            提交到 GitHub
+          </button>
+        )}
       </div>
 
-      {/* 左侧文件树区域 */}
-      <div className="leftPanel" style={{ width: leftPanelWidth }}>
-        <h2>文件资源管理器</h2>
-        {treeData && treeData.length > 0
-          ? treeData.map((node) => (
+      <div className="flex flex-1 pt-12">
+        {/* 左侧文件树 */}
+        <div className="leftPanel bg-gray-50 border-r border-gray-200 p-4 overflow-y-auto" style={{ width: leftPanelWidth }}>
+          <h2 className="text-gray-700 mb-3 border-b border-gray-300 pb-1">
+            文件资源管理器
+          </h2>
+          {treeData && treeData.length > 0 ? (
+            treeData.map((node) => (
               <TreeNode
                 key={node.path}
                 node={node}
@@ -318,309 +356,196 @@ export default function Home({
                 selectedPath={selectedPath}
               />
             ))
-          : "暂无数据"}
-      </div>
+          ) : (
+            <p>暂无数据</p>
+          )}
+        </div>
 
-      {/* 分隔条 */}
-      <div className="divider" onMouseDown={handleMouseDown} />
+        {/* 分隔条 */}
+        <div
+          className="divider bg-gray-200 cursor-col-resize"
+          onMouseDown={handleMouseDown}
+        />
 
-      {/* 右侧预览/编辑区域 */}
-      <div className="rightPanel">
-        <h2>预览 {selectedPath ? `- ${selectedPath}` : ""}</h2>
-        {loadingPreview ? (
-          <p>加载中...</p>
-        ) : isEditing ? (
-          <div className="editor-area">
-            <div className="editor-toolbar">
-              <button onClick={toggleEditorMode}>
-                {editorMode === "source" ? "切换到所见即所得模式" : "切换到源代码模式"}
-              </button>
-            </div>
-            {editorMode === "source" ? (
-              <div
-                onKeyDown={(e) => {
-                  if (e.key === "/") setShowCommitModal(false); // 此处可触发工具栏显示
-                }}
-              >
-                <Editor
-                  value={editContent}
-                  onValueChange={(code) => setEditContent(code)}
-                  highlight={(code) =>
-                    Prism.highlight(code, Prism.languages.markdown, "markdown")
-                  }
-                  padding={10}
-                  style={{
-                    fontFamily: '"Fira Code", monospace',
-                    fontSize: 14,
-                    backgroundColor: "#f5f5f5",
-                    color: "#333",
-                    border: "1px solid #ddd",
-                    borderRadius: "4px",
-                    minHeight: "300px",
-                  }}
-                  ref={editorRef}
+        {/* 右侧预览/编辑区域 */}
+        <div className="rightPanel flex-1 p-6 overflow-y-auto bg-white">
+          <h2 className="text-gray-700 mb-4 border-b border-gray-300 pb-2">
+            预览 {selectedPath ? `- ${selectedPath}` : ""}
+          </h2>
+          {loadingPreview ? (
+            <p>加载中...</p>
+          ) : isEditing ? (
+            <div className="editor-area relative">
+              <div className="editor-toolbar mb-2">
+                <button
+                  className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 mr-2"
+                  onClick={toggleEditorMode}
+                >
+                  {editorMode === "source" ? "切换到所见即所得" : "切换到源代码"}
+                </button>
+              </div>
+              {editorMode === "source" ? (
+                <div onKeyDown={handleKeyDown}>
+                  <Editor
+                    value={editContent}
+                    onValueChange={(code) => setEditContent(code)}
+                    highlight={(code) =>
+                      Prism.highlight(code, Prism.languages.markdown, "markdown")
+                    }
+                    padding={10}
+                    className="border border-gray-300 rounded bg-gray-100 text-gray-800 min-h-[300px]"
+                    style={{ fontFamily: '"Fira Code", monospace', fontSize: 14 }}
+                    ref={editorRef}
+                  />
+                  {toolbarVisible && (
+                    <div className="toolbar absolute top-[-40px] left-0 bg-white border border-gray-200 rounded shadow px-2 py-1">
+                      <button onClick={() => handleToolbarCommand("bold")} className="mr-1">
+                        Bold
+                      </button>
+                      <button onClick={() => handleToolbarCommand("italic")} className="mr-1">
+                        Italic
+                      </button>
+                      <button onClick={() => handleToolbarCommand("link")} className="mr-1">
+                        Link
+                      </button>
+                      <button onClick={() => handleToolbarCommand("code")} className="mr-1">
+                        Code
+                      </button>
+                      <button onClick={() => handleToolbarCommand("quote")}>Quote</button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div
+                  ref={visualRef}
+                  className="visual-editor border border-gray-300 rounded bg-gray-100 p-4 min-h-[300px]"
+                  contentEditable
+                  dangerouslySetInnerHTML={{ __html: marked(editContent) }}
                 />
+              )}
+              <div className="commit-area mt-3 flex items-center">
+                <input
+                  type="text"
+                  placeholder="提交说明"
+                  value={commitMsg}
+                  onChange={(e) => setCommitMsg(e.target.value)}
+                  className="border border-gray-300 rounded p-2 w-2/3 text-gray-800"
+                />
+                <button
+                  className="ml-3 px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+                  onClick={handleCommit}
+                  disabled={saving}
+                >
+                  {saving ? "提交中..." : "提交更改"}
+                </button>
+                <button
+                  className="ml-3 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                  onClick={handleCancelEdit}
+                >
+                  取消
+                </button>
               </div>
-            ) : (
-              <div
-                ref={visualRef}
-                className="visual-editor"
-                contentEditable
-                dangerouslySetInnerHTML={{ __html: marked(editContent) }}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="preview-container">
-            {previewMeta && previewMeta.isImage ? (
-              <img
-                src={`data:${previewMeta.mimeType};base64,${preview}`}
-                alt="预览图片"
-                style={{
-                  maxWidth: "100%",
-                  maxHeight: "calc(100vh - 150px)",
-                  objectFit: "contain",
-                }}
-              />
-            ) : previewMeta && previewMeta.isBinary ? (
-              <div className="binary-tip">二进制文件无法预览</div>
-            ) : (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {preview}
-              </ReactMarkdown>
-            )}
-            {!previewMeta?.isBinary && !previewMeta?.isImage && (
-              <div className="edit-btn">
-                <button onClick={handleEdit}>编辑文件</button>
-              </div>
-            )}
-          </div>
-        )}
+            </div>
+          ) : (
+            <div className="preview-container">
+              {previewMeta && previewMeta.isImage ? (
+                <img
+                  src={`data:${previewMeta.mimeType};base64,${preview}`}
+                  alt="预览图片"
+                  className="max-w-full max-h-[400px] object-contain mx-auto my-4"
+                />
+              ) : previewMeta && previewMeta.isBinary ? (
+                <div className="text-gray-500 p-4">二进制文件无法预览</div>
+              ) : (
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
+                  components={MarkdownComponents}
+                  className="prose prose-sm"
+                >
+                  {preview}
+                </ReactMarkdown>
+              )}
+              {previewMeta && !previewMeta.isBinary && !previewMeta.isImage && (
+                <div className="edit-btn mt-4">
+                  <button
+                    className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                    onClick={handleEdit}
+                  >
+                    编辑文件
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* 新建文件/文件夹模态窗 */}
+      {/* 新建文件/文件夹弹窗 */}
       {showNewModal && (
-        <div className="modal">
-          <div className="modal-content">
-            <h3>{newType === "file" ? "新建文件" : "新建文件夹"}</h3>
+        <div className="modal fixed inset-0 flex items-center justify-center bg-black bg-opacity-30 z-50">
+          <div className="modal-content bg-white p-4 rounded shadow w-72">
+            <h3 className="mb-2 text-gray-700">
+              {newType === "file" ? "新建文件" : "新建文件夹"}
+            </h3>
             <input
               type="text"
               placeholder="请输入名称"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
+              className="w-full border border-gray-300 rounded p-2 text-gray-800"
             />
-            <div className="modal-buttons">
-              <button onClick={handleNew}>确定</button>
-              <button onClick={() => setShowNewModal(false)}>取消</button>
+            <div className="modal-buttons mt-3 flex justify-end">
+              <button
+                onClick={handleNew}
+                className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                确定
+              </button>
+              <button
+                onClick={() => setShowNewModal(false)}
+                className="ml-2 px-3 py-1 bg-gray-500 text-white rounded hover:bg-gray-600"
+              >
+                取消
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 提交模态窗，显示在页面右上角 */}
+      {/* 提交弹窗 */}
       {showCommitModal && (
-        <div className="modal commit-modal">
-          <div className="modal-content">
-            <h3>输入提交信息</h3>
+        <div className="modal fixed inset-0 flex items-center justify-center bg-black bg-opacity-30 z-50">
+          <div className="modal-content bg-white p-4 rounded shadow w-72">
+            <h3 className="mb-2 text-gray-700">输入提交信息</h3>
             <input
               type="text"
               placeholder="提交说明"
               value={commitMsg}
               onChange={(e) => setCommitMsg(e.target.value)}
+              className="w-full border border-gray-300 rounded p-2 text-gray-800"
             />
-            <div className="modal-buttons">
-              <button onClick={handleCommit} disabled={saving}>
+            <div className="modal-buttons mt-3 flex justify-end">
+              <button
+                onClick={handleCommit}
+                disabled={saving}
+                className="px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+              >
                 {saving ? "提交中..." : "提交"}
               </button>
-              <button onClick={() => setShowCommitModal(false)}>取消</button>
+              <button
+                onClick={() => setShowCommitModal(false)}
+                className="ml-2 px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+              >
+                取消
+              </button>
             </div>
           </div>
         </div>
       )}
-
-      {/* 全局样式 */}
-      <style jsx global>{`
-        /* 通用 */
-        body {
-          margin: 0;
-          padding: 0;
-          background: #ffffff;
-          color: #333;
-          font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-          font-size: 14px;
-        }
-        .app {
-          display: flex;
-          height: 100vh;
-        }
-        /* 顶部工具栏 */
-        .topbar {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 45px;
-          background: #ffffff;
-          border-bottom: 1px solid #ddd;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 0 15px;
-          z-index: 1000;
-        }
-        .topbar button {
-          margin-right: 10px;
-        }
-        .topbar-left button:last-child {
-          margin-right: 0;
-        }
-        /* 左侧 */
-        .leftPanel {
-          background: #f8f8f8;
-          border-right: 1px solid #ddd;
-          padding: 60px 10px 10px 10px; /* 顶部预留工具栏 */
-          overflow-y: auto;
-        }
-        .leftPanel h2 {
-          margin: 0 0 10px;
-          padding-bottom: 5px;
-          border-bottom: 1px solid #ddd;
-          color: #555;
-        }
-        .tree-node {
-          margin-left: 10px;
-        }
-        .node-label {
-          padding: 4px 8px;
-          border-radius: 3px;
-          cursor: pointer;
-        }
-        .node-label.selected {
-          background: #e7f3ff;
-          border-left: 3px solid #007acc;
-          color: #007acc;
-        }
-        /* 分隔条 */
-        .divider {
-          width: 5px;
-          cursor: col-resize;
-          background: #ddd;
-        }
-        /* 右侧 */
-        .rightPanel {
-          flex: 1;
-          padding: 60px 20px 20px 20px; /* 顶部预留工具栏 */
-          overflow-y: auto;
-        }
-        .rightPanel h2 {
-          margin: 0 0 15px;
-          border-bottom: 1px solid #ddd;
-          padding-bottom: 5px;
-          color: #555;
-        }
-        .preview-container pre {
-          background: #f5f5f5;
-          padding: 10px;
-          border-radius: 3px;
-          overflow: auto;
-        }
-        .preview-container img {
-          max-width: 100%;
-          max-height: 400px;
-          object-fit: scale-down;
-          display: block;
-          margin: 10px auto;
-        }
-        .binary-tip {
-          padding: 1rem;
-          color: #888;
-        }
-        .edit-btn {
-          margin-top: 1rem;
-        }
-        /* 编辑区域 */
-        .editor-area {
-          position: relative;
-        }
-        .editor-toolbar {
-          margin-bottom: 10px;
-        }
-        .visual-editor {
-          border: 1px solid #ddd;
-          padding: 10px;
-          border-radius: 3px;
-          min-height: 300px;
-          background: #f5f5f5;
-          color: #333;
-        }
-        textarea {
-          border: 1px solid #ddd;
-          padding: 10px;
-          border-radius: 3px;
-          width: 100%;
-          min-height: 300px;
-          font-family: Consolas, "Courier New", monospace;
-        }
-        .commit-area {
-          margin-top: 10px;
-        }
-        .commit-area input[type="text"] {
-          width: 60%;
-          margin-right: 10px;
-        }
-        /* 模态窗 */
-        .modal {
-          position: fixed;
-          top: 0;
-          left: 0;
-          width: 100%;
-          height: 100%;
-          background: rgba(0, 0, 0, 0.3);
-          display: flex;
-          justify-content: center;
-          align-items: center;
-          z-index: 2000;
-        }
-        .modal-content {
-          background: #ffffff;
-          padding: 20px;
-          border-radius: 5px;
-          width: 300px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-        }
-        .modal-buttons {
-          margin-top: 15px;
-          display: flex;
-          justify-content: flex-end;
-        }
-        .modal-buttons button {
-          margin-left: 10px;
-        }
-        /* 工具栏（源码编辑时召唤） */
-        .toolbar {
-          position: absolute;
-          top: -40px;
-          left: 0;
-          background: #ffffff;
-          border: 1px solid #ddd;
-          padding: 5px;
-          border-radius: 3px;
-          box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-          z-index: 10;
-        }
-        .toolbar button {
-          margin-right: 5px;
-        }
-      `}</style>
     </div>
   );
 }
 
-/**
- * getServerSideProps
- * 读取环境变量，调用 GitHub API 获取仓库信息、默认分支和树结构，
- * 并将 GITHUB_ROUTE 中除 owner/repo 部分作为初始展开目录传递。
- */
 export async function getServerSideProps() {
   const githubUserToken = process.env.GITHUB_USER_TOKEN;
   const githubRoute = process.env.GITHUB_ROUTE;
@@ -639,17 +564,13 @@ export async function getServerSideProps() {
     Accept: "application/vnd.github.v3+json",
   };
   try {
-    const repoResponse = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}`,
-      { headers }
-    );
+    const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
     if (!repoResponse.ok) {
       const errorData = await repoResponse.json();
       return { props: { error: errorData.message || "无法获取仓库信息" } };
     }
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || "main";
-
     const branchResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/branches/${defaultBranch}`,
       { headers }
@@ -660,7 +581,6 @@ export async function getServerSideProps() {
     }
     const branchData = await branchResponse.json();
     const treeSha = branchData.commit.commit.tree.sha;
-
     const treeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
       { headers }

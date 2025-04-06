@@ -8,16 +8,20 @@
       "start": "next start"
     },
     "dependencies": {
-      "next": "13.4.12",   
-      "react": "18.2.0",
-      "react-dom": "18.2.0",
-      "react-markdown": "^8.0.3",
-      "remark-gfm": "^3.0.1",
-      "react-syntax-highlighter": "^15.5.0",
-      "marked": "^5.0.2",
-      "turndown": "^7.1.1",
-      "react-simple-code-editor": "^0.11.0",
-      "prismjs": "^1.29.0"
+    "autoprefixer": "^10.4.14",
+    "marked": "^5.0.2",
+    "next": "13.4.12",
+    "postcss": "^8.4.21",
+    "prismjs": "^1.29.0",
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-markdown": "^8.0.3",
+    "react-simple-code-editor": "^0.11.0",
+    "react-syntax-highlighter": "^15.5.0",
+    "remark-breaks": "^3.0.2",
+    "remark-gfm": "^3.0.1",
+    "tailwindcss": "^3.2.7",
+    "turndown": "^7.1.1"
   }
 }
   
