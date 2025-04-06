@@ -5,7 +5,6 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: '缺少文件 path 参数' });
   }
 
-  // 获取服务器端的 GitHub 用户令牌和仓库路径（格式："owner/repo"）
   const githubUserToken = process.env.GITHUB_USER_TOKEN;
   const githubRoute = process.env.GITHUB_ROUTE;
 
@@ -16,8 +15,6 @@ export default async function handler(req, res) {
   }
 
   const [owner, repo] = githubRoute.split('/');
-
-  // 构造 GitHub 文件内容接口 URL
   const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${ref || 'main'}`;
 
   const headers = {
@@ -31,10 +28,47 @@ export default async function handler(req, res) {
       const errText = await response.text();
       return res.status(response.status).json({ error: errText });
     }
-    // 返回文件原始内容（文本格式）
-    const content = await response.text();
-    res.status(200).json({ content });
+
+    // 根据文件扩展名判断处理方式
+    let extension = '';
+    if (path.includes('.')) {
+      extension = path.split('.').pop().toLowerCase();
+    }
+    const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'];
+    const textFileExts = ['js', 'json', 'css', 'html', 'md', 'txt', 'xml', 'csv', 'log'];
+
+    if (imageExts.includes(extension)) {
+      // 图片文件：读取为二进制，转换为 base64
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      let mimeType = 'image/jpeg';
+      if (extension === 'png') mimeType = 'image/png';
+      else if (extension === 'gif') mimeType = 'image/gif';
+      else if (extension === 'bmp') mimeType = 'image/bmp';
+      else if (extension === 'webp') mimeType = 'image/webp';
+      return res.status(200).json({
+        content: base64,
+        mimeType,
+        isImage: true,
+        isBinary: false,
+      });
+    } else if (textFileExts.includes(extension)) {
+      // 文本文件：直接以文本方式返回
+      const content = await response.text();
+      return res.status(200).json({
+        content,
+        isImage: false,
+        isBinary: false,
+      });
+    } else {
+      // 其他情况：认为是二进制文件，无法预览
+      return res.status(200).json({
+        content: '二进制文件无法预览',
+        isImage: false,
+        isBinary: true,
+      });
+    }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 }

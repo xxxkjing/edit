@@ -40,7 +40,7 @@ function buildTree(flatList) {
  * - node: 当前节点数据
  * - onFileSelect: 当文件被点击时触发回调
  * - initialPath: 初始展开路径设置（字符串，仓库根后子目录路径）
- * - selectedPath: 当前选中的文件的完整路径
+ * - selectedPath: 当前选中的文件完整路径
  */
 function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
   // 自动展开：如果 initialPath 存在且当前节点为文件夹，并且 initialPath 与当前节点匹配或以其为前缀
@@ -52,7 +52,7 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
 
   // 当节点正好与初始路径精确匹配时（初始展开状态下）
   const isHighlighted = node.type === 'tree' && initialPath === node.path;
-  // 如果当前节点为文件，并且其路径和选中路径匹配，标记选中状态
+  // 如果当前节点为文件，并且其路径与选中路径匹配，标记选中状态
   const isSelected = node.type === 'blob' && selectedPath === node.path;
 
   const handleClick = () => {
@@ -63,7 +63,6 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
     }
   };
 
-  // 复合样式：支持选中高亮和初始展开高亮效果
   const nodeStyle = {
     cursor: 'pointer',
     userSelect: 'none',
@@ -77,18 +76,13 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
   return (
     <div style={{ marginLeft: '20px' }}>
       <div onClick={handleClick} style={nodeStyle}>
-        {node.children && node.children.length > 0
-          ? expanded
-            ? '[-] '
-            : '[+] '
-          : '    '}
+        {node.children && node.children.length > 0 ? (expanded ? '[-] ' : '[+] ') : '    '}
         {node.type === 'tree' ? '📁' : '📄'} {node.path.split('/').pop()}
       </div>
       {expanded &&
         node.children &&
         node.children
           .sort((a, b) => {
-            // 文件夹优先、按名称排序
             if (a.type === b.type) return a.path.localeCompare(b.path);
             return a.type === 'tree' ? -1 : 1;
           })
@@ -111,7 +105,7 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
  * - treeData: 仓库文件树数据
  * - owner, repo, defaultBranch: 仓库基本信息
  * - initialPath: 用户配置的初始展开子目录路径（仓库根后的路径）
- * - error: 错误信息（如果有的话）
+ * - error: 错误信息（如果有）
  */
 export default function Home({
   treeData,
@@ -123,11 +117,11 @@ export default function Home({
 }) {
   const [selectedPath, setSelectedPath] = useState(null);
   const [preview, setPreview] = useState('');
+  const [previewMeta, setPreviewMeta] = useState(null); // 新增存储返回的数据附加信息
   const [loadingPreview, setLoadingPreview] = useState(false);
-  // 控制左侧面板宽度（初始300px，最小150px）
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
 
-  // 拖拽分隔条逻辑
+  // 分隔条拖拽逻辑
   const handleMouseDown = (e) => {
     const startX = e.clientX;
     const startWidth = leftPanelWidth;
@@ -154,6 +148,7 @@ export default function Home({
     setSelectedPath(file.path);
     setLoadingPreview(true);
     setPreview('');
+    setPreviewMeta(null);
     try {
       const res = await fetch(
         `/api/preview?path=${encodeURIComponent(file.path)}&ref=${defaultBranch}`
@@ -164,6 +159,7 @@ export default function Home({
       } else {
         const data = await res.json();
         setPreview(data.content);
+        setPreviewMeta(data); // 保存返回的附加信息
       }
     } catch (e) {
       setPreview(`Error: ${e.message}`);
@@ -180,21 +176,16 @@ export default function Home({
     );
   }
 
-  // 判断是否为 Markdown 文件
+  // 判断是否为 Markdown 文件（仅对文本内容进行 Markdown 渲染）
   const isMarkdown =
     selectedPath && selectedPath.toLowerCase().endsWith('.md');
 
-  // Markdown 中代码块处理组件
+  // Markdown 代码块处理
   const markdownComponents = {
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
-        <SyntaxHighlighter
-          style={syntaxStyle}
-          language={match[1]}
-          PreTag="div"
-          {...props}
-        >
+        <SyntaxHighlighter style={syntaxStyle} language={match[1]} PreTag="div" {...props}>
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       ) : (
@@ -208,10 +199,7 @@ export default function Home({
   return (
     <div className="app">
       {/* 左侧：文件树面板 */}
-      <div
-        className="leftPanel"
-        style={{ width: leftPanelWidth, minWidth: 150 }}
-      >
+      <div className="leftPanel" style={{ width: leftPanelWidth, minWidth: 150 }}>
         <h2>仓库文件树</h2>
         {treeData && treeData.length > 0 ? (
           treeData.map((node) => (
@@ -238,27 +226,34 @@ export default function Home({
         </h2>
         {loadingPreview ? (
           <p>加载预览…</p>
+        ) : previewMeta && previewMeta.isImage ? (
+          // 图片预览
+          <img
+            src={`data:${previewMeta.mimeType};base64,${preview}`}
+            alt="预览图片"
+            style={{ maxWidth: '100%', maxHeight: '100%' }}
+          />
+        ) : previewMeta && previewMeta.isBinary ? (
+          // 非图片二进制文件提示
+          <div style={{ padding: '1rem', color: '#888' }}>二进制文件无法预览</div>
         ) : isMarkdown ? (
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            components={markdownComponents}
-          >
+          // Markdown 文件预览
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {preview}
           </ReactMarkdown>
         ) : (
+          // 其他文件按纯文本预览
           <pre>{preview}</pre>
         )}
       </div>
 
       {/* 全局样式，参考 Typora 的简洁现代风格 */}
       <style jsx global>{`
-        /* 基础排版 */
         body {
           margin: 0;
           padding: 0;
           background: #fdfdfd;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-            "Helvetica Neue", Arial, sans-serif;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
           color: #333;
           line-height: 1.6;
         }
@@ -291,8 +286,6 @@ export default function Home({
           background: #f6f8fa;
           color: #6a737d;
         }
-
-        /* 整体布局 */
         .app {
           display: flex;
           height: 100vh;
@@ -303,7 +296,7 @@ export default function Home({
           overflow-y: auto;
           padding: 20px;
           border-right: 1px solid #eee;
-          box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+          box-shadow: 2px 0 5px rgba(0,0,0,0.05);
         }
         .divider {
           width: 5px;
@@ -316,7 +309,6 @@ export default function Home({
           overflow-y: auto;
           padding: 20px;
         }
-        /* 调整 Markdown 预览样式 */
         .rightPanel h2 {
           border-bottom: 1px solid #eee;
           padding-bottom: 10px;
@@ -363,7 +355,7 @@ export async function getServerSideProps() {
   };
 
   try {
-    // ① 获取仓库基本信息（默认分支）
+    // 获取仓库基本信息（默认分支）
     const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
     if (!repoResponse.ok) {
       const errorData = await repoResponse.json();
@@ -374,7 +366,7 @@ export async function getServerSideProps() {
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || 'main';
 
-    // ② 获取分支信息以得到树对象 SHA
+    // 获取分支信息以得到树对象 SHA
     const branchResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/branches/${defaultBranch}`,
       { headers }
@@ -388,7 +380,7 @@ export async function getServerSideProps() {
     const branchData = await branchResponse.json();
     const treeSha = branchData.commit.commit.tree.sha;
 
-    // ③ 获取仓库完整文件树（递归获取所有目录和文件）
+    // 获取仓库完整文件树（递归获取所有目录和文件）
     const treeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
       { headers }
