@@ -5,7 +5,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { tomorrow as syntaxStyle } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
 /**
- * 将 GitHub API 返回的平面列表构建为树形结构
+ * 将 GitHub API 返回的平面列表构建为树形结构数据
  * @param {Array} flatList - GitHub API 返回的数组，包含 file/tree 对象
  * @returns {Array} 树形结构数据
  */
@@ -173,7 +173,7 @@ export default function Home({
 
   if (error) {
     return (
-      <div style={{ padding: '20px', fontFamily: 'Segoe UI, sans-serif' }}>
+      <div className="container">
         <h1>加载仓库数据错误</h1>
         <p>{error}</p>
       </div>
@@ -189,7 +189,12 @@ export default function Home({
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
-        <SyntaxHighlighter style={syntaxStyle} language={match[1]} PreTag="div" {...props}>
+        <SyntaxHighlighter
+          style={syntaxStyle}
+          language={match[1]}
+          PreTag="div"
+          {...props}
+        >
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       ) : (
@@ -201,29 +206,13 @@ export default function Home({
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        height: '100vh',
-        fontFamily: 'Segoe UI, Arial, sans-serif',
-        background: '#f5f7fa',
-      }}
-    >
+    <div className="app">
       {/* 左侧：文件树面板 */}
       <div
-        style={{
-          width: leftPanelWidth,
-          minWidth: 150,
-          background: '#fff',
-          overflowY: 'auto',
-          padding: '20px',
-          borderRight: '1px solid #ddd',
-          boxShadow: '2px 0 5px rgba(0,0,0,0.1)',
-        }}
+        className="leftPanel"
+        style={{ width: leftPanelWidth, minWidth: 150 }}
       >
-        <h2 style={{ borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-          仓库文件树
-        </h2>
+        <h2>仓库文件树</h2>
         {treeData && treeData.length > 0 ? (
           treeData.map((node) => (
             <TreeNode
@@ -239,38 +228,100 @@ export default function Home({
         )}
       </div>
 
-      {/* 分隔条（拖拽调整宽度） */}
-      <div
-        style={{
-          width: '5px',
-          cursor: 'col-resize',
-          backgroundColor: '#ddd',
-        }}
-        onMouseDown={handleMouseDown}
-      />
+      {/* 分隔条 */}
+      <div className="divider" onMouseDown={handleMouseDown} />
 
       {/* 右侧：预览面板 */}
-      <div
-        style={{
-          flex: 1,
-          background: '#fff',
-          overflowY: 'auto',
-          padding: '20px',
-        }}
-      >
-        <h2 style={{ borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+      <div className="rightPanel">
+        <h2>
           预览 {selectedPath ? `- ${selectedPath}` : '（未选择文件）'}
         </h2>
         {loadingPreview ? (
           <p>加载预览…</p>
         ) : isMarkdown ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={markdownComponents}
+          >
             {preview}
           </ReactMarkdown>
         ) : (
-          <pre style={{ whiteSpace: 'pre-wrap' }}>{preview}</pre>
+          <pre>{preview}</pre>
         )}
       </div>
+
+      {/* 全局样式，参考 Typora 的简洁现代风格 */}
+      <style jsx global>{`
+        /* 基础排版 */
+        body {
+          margin: 0;
+          padding: 0;
+          background: #fdfdfd;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+            "Helvetica Neue", Arial, sans-serif;
+          color: #333;
+          line-height: 1.6;
+        }
+        h1, h2, h3, h4, h5, h6 {
+          font-weight: 600;
+          margin: 1rem 0 0.5rem 0;
+        }
+        p {
+          margin: 0 0 1rem;
+        }
+        a {
+          color: #0366d6;
+          text-decoration: none;
+        }
+        pre {
+          background: #f6f8fa;
+          padding: 1rem;
+          border-radius: 4px;
+          overflow: auto;
+        }
+        code {
+          background: #f6f8fa;
+          padding: 0.2rem 0.4rem;
+          border-radius: 3px;
+        }
+        blockquote {
+          margin: 0 0 1rem;
+          padding: 0.5rem 1rem;
+          border-left: 0.25rem solid #dfe2e5;
+          background: #f6f8fa;
+          color: #6a737d;
+        }
+
+        /* 整体布局 */
+        .app {
+          display: flex;
+          height: 100vh;
+          background: #f5f7fa;
+        }
+        .leftPanel {
+          background: #fff;
+          overflow-y: auto;
+          padding: 20px;
+          border-right: 1px solid #eee;
+          box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+        }
+        .divider {
+          width: 5px;
+          cursor: col-resize;
+          background: #eee;
+        }
+        .rightPanel {
+          flex: 1;
+          background: #fff;
+          overflow-y: auto;
+          padding: 20px;
+        }
+        /* 调整 Markdown 预览样式 */
+        .rightPanel h2 {
+          border-bottom: 1px solid #eee;
+          padding-bottom: 10px;
+        }
+      `}</style>
     </div>
   );
 }
