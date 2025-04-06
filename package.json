@@ -13,7 +13,9 @@
       "react-dom": "18.2.0",
       "react-markdown": "^8.0.3",
       "remark-gfm": "^3.0.1",
-      "react-syntax-highlighter": "^15.5.0"
+      "react-syntax-highlighter": "^15.5.0",
+      "marked": "^5.0.2",
+      "turndown": "^7.1.1"
     }
   }
   
