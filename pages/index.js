@@ -7,14 +7,13 @@ import { marked } from 'marked';
 import TurndownService from 'turndown';
 
 /**
- * 将 GitHub API 返回的平面列表构建为树形结构数据
- * @param {Array} flatList - GitHub API 返回的数组，包含 file/tree 对象
- * @returns {Array} 树形结构数据
+ * 将 GitHub API 返回的平面列表构建为嵌套的树形结构
+ * @param {Array} flatList GitHub API 返回的数组，每项代表文件或目录对象
+ * @returns {Array} 嵌套的树形结构数据
  */
 function buildTree(flatList) {
   const tree = [];
   const map = {};
-
   flatList.forEach((item) => {
     item.children = [];
     map[item.path] = item;
@@ -27,33 +26,28 @@ function buildTree(flatList) {
       if (map[parentPath]) {
         map[parentPath].children.push(item);
       } else {
-        // 找不到父节点时归为顶级节点（异常数据）
+        // 找不到父节点的归为顶级（异常数据）
         tree.push(item);
       }
     }
   });
-
   return tree;
 }
 
 /**
- * 递归组件：展示文件夹/文件节点
+ * 递归组件：展示文件夹／文件节点
  * Props:
- * - node: 当前节点数据
- * - onFileSelect: 当文件被点击时触发回调
- * - initialPath: 初始展开路径设置（仓库根后子目录路径）
- * - selectedPath: 当前选中的文件完整路径
+ *   node：节点数据
+ *   onFileSelect：点击文件时的回调
+ *   initialPath：初始展开的目录（仓库根后的路径，如 "test"）
+ *   selectedPath：当前选中文件完整路径
  */
 function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
-  // 若 initialPath 存在且当前节点为文件夹，并且 initialPath 与当前节点匹配或为其前缀，则自动展开
   const shouldExpand =
     initialPath &&
     node.type === 'tree' &&
     (initialPath === node.path || initialPath.startsWith(node.path + '/'));
   const [expanded, setExpanded] = useState(!!shouldExpand);
-
-  // 如果当前节点与初始路径精确匹配，则高亮；
-  // 如果当前为文件且路径等于选中路径，则显示选中状态
   const isHighlighted = node.type === 'tree' && initialPath === node.path;
   const isSelected = node.type === 'blob' && selectedPath === node.path;
 
@@ -65,20 +59,17 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
     }
   };
 
-  const nodeStyle = {
-    cursor: 'pointer',
-    userSelect: 'none',
-    backgroundColor: isSelected ? '#f0f8ff' : isHighlighted ? '#ffffe0' : 'transparent',
-    borderLeft: isSelected ? '3px solid #0070f3' : 'none',
-    padding: '4px 8px',
-    borderRadius: '4px',
-    margin: '2px 0',
-  };
-
   return (
-    <div style={{ marginLeft: '20px' }}>
-      <div onClick={handleClick} style={nodeStyle}>
-        {node.children && node.children.length > 0 ? (expanded ? '[-] ' : '[+] ') : '    '}
+    <div className="tree-node">
+      <div
+        onClick={handleClick}
+        className={`node-label ${isSelected ? 'selected' : ''}`}
+      >
+        {node.children && node.children.length > 0
+          ? expanded
+            ? '[-] '
+            : '[+] '
+          : '    '}
         {node.type === 'tree' ? '📁' : '📄'} {node.path.split('/').pop()}
       </div>
       {expanded &&
@@ -104,10 +95,10 @@ function TreeNode({ node, onFileSelect, initialPath, selectedPath }) {
 /**
  * 主页面组件
  * Props:
- * - treeData: 仓库文件树数据
- * - owner, repo, defaultBranch: 仓库基本信息
- * - initialPath: 用户配置的初始展开子目录路径（仓库根后的路径）
- * - error: 错误信息（如有）
+ *   treeData：仓库文件树数据
+ *   owner、repo、defaultBranch：仓库基本信息
+ *   initialPath：配置的初始展开目录（仓库根后路径）
+ *   error：错误信息（如有）
  */
 export default function Home({
   treeData,
@@ -117,10 +108,10 @@ export default function Home({
   error,
   initialPath,
 }) {
-  // 预览、文件选择相关状态
+  // 用于预览、文件选择
   const [selectedPath, setSelectedPath] = useState(null);
   const [preview, setPreview] = useState('');
-  const [previewMeta, setPreviewMeta] = useState(null); // 保存 API 返回的附加信息（如 isImage、isBinary 等）
+  const [previewMeta, setPreviewMeta] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
 
@@ -133,27 +124,24 @@ export default function Home({
   const [saving, setSaving] = useState(false);
   const visualRef = useRef(null);
 
-  // 拖拽调整左侧面板宽度
+  // 调整左侧面板宽度
   const handleMouseDown = (e) => {
     const startX = e.clientX;
     const startWidth = leftPanelWidth;
-
     const onMouseMove = (e) => {
       const delta = e.clientX - startX;
       setLeftPanelWidth(Math.max(150, startWidth + delta));
     };
-
     const onMouseUp = () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
-
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   };
 
   /**
-   * 预览文件（仅展示预览，不进入编辑模式）
+   * 预览模式：调用 /api/preview 获取文件内容
    */
   const handleFileSelect = async (file) => {
     if (file.type !== 'blob') return;
@@ -177,11 +165,11 @@ export default function Home({
       setPreview(`Error: ${e.message}`);
     }
     setLoadingPreview(false);
-    setIsEditing(false); // 若此前处于编辑状态，则退出编辑
+    setIsEditing(false);
   };
 
   /**
-   * 进入编辑模式：调用 /api/preview 时使用 edit=true 获取带有 sha 的信息
+   * 进入编辑模式：调用 /api/preview?edit=true 请求获取文件的最新内容及 SHA
    */
   const handleEdit = async () => {
     if (!selectedPath) return;
@@ -192,7 +180,7 @@ export default function Home({
       );
       if (!res.ok) {
         const errText = await res.text();
-        alert("获取编辑文件内容失败：" + errText);
+        alert("获取编辑内容失败：" + errText);
         setLoadingPreview(false);
         return;
       }
@@ -213,15 +201,14 @@ export default function Home({
   };
 
   /**
-   * 切换编辑模式：源代码编辑 与 可视化编辑
+   * 切换编辑模式：源代码编辑 与 所见即所得
    */
   const toggleEditorMode = () => {
     if (editorMode === "source") {
-      // 切换到可视化编辑
+      // 切换到所见即所得：通过 marked 将 markdown 转为 HTML
       setEditorMode("visual");
     } else {
-      // 切换回源代码编辑
-      // 采用 Turndown 将 visual 编辑区内容转换回 markdown
+      // 切换到源代码编辑：利用 Turndown 将 visual 编辑区内容转回 Markdown
       if (visualRef.current) {
         const tdService = new TurndownService();
         const markdown = tdService.turndown(visualRef.current.innerHTML);
@@ -232,7 +219,7 @@ export default function Home({
   };
 
   /**
-   * 提交更改：调用 /api/save 提交更新后的文件内容
+   * 提交修改：调用 /api/save 提交更新后的内容
    */
   const handleCommit = async () => {
     if (!commitMsg) {
@@ -247,18 +234,18 @@ export default function Home({
         body: JSON.stringify({
           path: selectedPath,
           message: commitMsg,
-          content: editContent, // 保持 markdown 格式
+          content: editContent,
           sha: fileSha,
           branch: defaultBranch
-        })
+        }),
       });
       if (!res.ok) {
         const errText = await res.text();
-        alert("提交失败： " + errText);
+        alert("提交失败：" + errText);
       } else {
         alert("提交成功！");
         setIsEditing(false);
-        // 重新加载预览内容
+        // 刷新预览内容
         handleFileSelect({ path: selectedPath, type: "blob" });
       }
     } catch (e) {
@@ -274,18 +261,29 @@ export default function Home({
     setFileSha(null);
   };
 
-  // 判断是否为 Markdown 文本（仅对源文件进行 Markdown 渲染）
-  const isMarkdown =
+  // 仅对预览内容是文本时，允许进入编辑模式
+  const canEdit =
+    previewMeta &&
+    !previewMeta.isBinary &&
+    !previewMeta.isImage;
+
+  // 如果文件为 Markdown 且属于文本预览，则使用 ReactMarkdown 呈现
+  const isMarkdown = 
     selectedPath &&
     selectedPath.toLowerCase().endsWith('.md') &&
-    (!previewMeta || (!previewMeta.isBinary && !previewMeta.isImage));
+    canEdit;
 
-  // Markdown 代码块处理组件
+  // Markdown 代码块处理
   const markdownComponents = {
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
-        <SyntaxHighlighter style={syntaxStyle} language={match[1]} PreTag="div" {...props}>
+        <SyntaxHighlighter
+          style={syntaxStyle}
+          language={match[1]}
+          PreTag="div"
+          {...props}
+        >
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       ) : (
@@ -298,9 +296,9 @@ export default function Home({
 
   return (
     <div className="app">
-      {/* 左侧：文件树区域 */}
-      <div className="leftPanel" style={{ width: leftPanelWidth, minWidth: 150 }}>
-        <h2>仓库文件树</h2>
+      {/* 左侧文件树区域 */}
+      <div className="leftPanel" style={{ width: leftPanelWidth }}>
+        <h2>资源管理器</h2>
         {treeData && treeData.length > 0 ? (
           treeData.map((node) => (
             <TreeNode
@@ -312,165 +310,208 @@ export default function Home({
             />
           ))
         ) : (
-          <p>没有目录数据可显示。</p>
+          <p>没有目录数据。</p>
         )}
       </div>
 
       {/* 分隔条 */}
       <div className="divider" onMouseDown={handleMouseDown} />
 
-      {/* 右侧：预览/编辑区域 */}
+      {/* 右侧预览/编辑区域 */}
       <div className="rightPanel">
-        <h2>
-          预览 {selectedPath ? `- ${selectedPath}` : '（未选择文件）'}
-        </h2>
+        <h2>预览 {selectedPath ? `- ${selectedPath}` : ""}</h2>
         {loadingPreview ? (
-          <p>加载预览…</p>
+          <p>加载中...</p>
         ) : isEditing ? (
-          // 编辑模式
-          <div>
-            <div style={{ marginBottom: '1rem' }}>
+          <div className="editor-area">
+            <div className="editor-toolbar">
               <button onClick={toggleEditorMode}>
-                切换到 {editorMode === "source" ? "所见即所得" : "源代码编辑"} 模式
+                切换到 {editorMode === "source" ? "所见即所得" : "源代码"} 模式
               </button>
             </div>
             {editorMode === "source" ? (
               <textarea
-                style={{ width: '100%', height: '300px', fontFamily: 'monospace', fontSize: '14px' }}
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
               />
             ) : (
               <div
                 ref={visualRef}
+                className="visual-editor"
                 contentEditable
-                style={{
-                  width: '100%',
-                  minHeight: '300px',
-                  border: '1px solid #ddd',
-                  padding: '10px',
-                  borderRadius: '4px'
-                }}
-                // 初始化时填充 HTML（由 marked 转换而来）
                 dangerouslySetInnerHTML={{ __html: marked(editContent) }}
-                onInput={(e) => {
-                  // 此处不直接同步 editContent，如果切换回源代码模式时再转换即可
-                }}
               />
             )}
-            <div style={{ marginTop: '1rem' }}>
+            <div className="commit-area">
               <input
                 type="text"
-                placeholder="请输入提交信息"
+                placeholder="提交说明"
                 value={commitMsg}
                 onChange={(e) => setCommitMsg(e.target.value)}
-                style={{ width: '60%', padding: '8px', marginRight: '10px' }}
               />
               <button onClick={handleCommit} disabled={saving}>
                 {saving ? "提交中..." : "提交更改"}
               </button>
-              <button onClick={handleCancelEdit} style={{ marginLeft: '10px' }}>
-                取消编辑
-              </button>
+              <button onClick={handleCancelEdit}>取消</button>
             </div>
           </div>
         ) : (
-          // 预览模式
-          <div>
+          <div className="preview-container">
             {previewMeta && previewMeta.isImage ? (
               <img
                 src={`data:${previewMeta.mimeType};base64,${preview}`}
                 alt="预览图片"
                 style={{
                   maxWidth: '100%',
-                  maxHeight: 'calc(100vh - 100px)',
+                  maxHeight: 'calc(100vh - 150px)',
                   objectFit: 'contain'
                 }}
               />
             ) : previewMeta && previewMeta.isBinary ? (
-              <div style={{ padding: '1rem', color: '#888' }}>二进制文件无法预览</div>
+              <div>二进制文件无法预览</div>
             ) : isMarkdown ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={markdownComponents}
+              >
                 {preview}
               </ReactMarkdown>
             ) : (
               <pre>{preview}</pre>
             )}
-            {/* 如果当前预览文件是文本，则显示“编辑”按钮 */}
-            {previewMeta && !previewMeta.isBinary && !previewMeta.isImage && (
+            {canEdit && (
               <div style={{ marginTop: '1rem' }}>
-                <button onClick={handleEdit}>编辑</button>
+                <button onClick={handleEdit}>编辑文件</button>
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* 全局样式，参考 Typora 的简洁现代风格 */}
+      {/* 全局样式，参考 vscode.dev */}
       <style jsx global>{`
+        /* 全局背景和字体 */
         body {
           margin: 0;
           padding: 0;
-          background: #fdfdfd;
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-          color: #333;
-          line-height: 1.6;
-        }
-        h1, h2, h3, h4, h5, h6 {
-          font-weight: 600;
-          margin: 1rem 0 0.5rem 0;
-        }
-        p {
-          margin: 0 0 1rem;
-        }
-        a {
-          color: #0366d6;
-          text-decoration: none;
-        }
-        pre {
-          background: #f6f8fa;
-          padding: 1rem;
-          border-radius: 4px;
-          overflow: auto;
-        }
-        code {
-          background: #f6f8fa;
-          padding: 0.2rem 0.4rem;
-          border-radius: 3px;
-        }
-        blockquote {
-          margin: 0 0 1rem;
-          padding: 0.5rem 1rem;
-          border-left: 0.25rem solid #dfe2e5;
-          background: #f6f8fa;
-          color: #6a737d;
+          background: #1e1e1e;
+          color: #d4d4d4;
+          font-family: "Segoe UI", Tahoma, sans-serif;
+          font-size: 14px;
         }
         .app {
           display: flex;
           height: 100vh;
-          background: #f5f7fa;
+          background: #1e1e1e;
         }
+        /* 左侧资源管理器 */
         .leftPanel {
-          background: #fff;
+          background: #252526;
+          border-right: 1px solid #3c3c3c;
+          padding: 10px;
           overflow-y: auto;
-          padding: 20px;
-          border-right: 1px solid #eee;
-          box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+          width: 300px;
         }
+        .leftPanel h2 {
+          color: #cccccc;
+          margin: 0 0 10px;
+          padding-bottom: 5px;
+          border-bottom: 1px solid #3c3c3c;
+        }
+        /* 分隔条 */
         .divider {
           width: 5px;
           cursor: col-resize;
-          background: #eee;
+          background: #3c3c3c;
         }
+        /* 右侧预览与编辑区域 */
         .rightPanel {
           flex: 1;
-          background: #fff;
-          overflow-y: auto;
+          background: #1e1e1e;
           padding: 20px;
+          overflow-y: auto;
         }
         .rightPanel h2 {
-          border-bottom: 1px solid #eee;
-          padding-bottom: 10px;
+          color: #cccccc;
+          margin: 0 0 15px;
+          border-bottom: 1px solid #3c3c3c;
+          padding-bottom: 5px;
+        }
+        /* 按钮风格 */
+        button {
+          background: #0e639c;
+          border: none;
+          color: #ffffff;
+          padding: 6px 12px;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 14px;
+        }
+        button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        /* 输入框风格 */
+        input[type="text"] {
+          background: #1e1e1e;
+          border: 1px solid #3c3c3c;
+          padding: 6px;
+          border-radius: 3px;
+          color: #d4d4d4;
+          font-size: 14px;
+        }
+        /* 文本编辑区（源代码模式） */
+        textarea {
+          background: #1e1e1e;
+          border: 1px solid #3c3c3c;
+          color: #d4d4d4;
+          width: 100%;
+          height: 300px;
+          padding: 10px;
+          font-family: Consolas, "Courier New", monospace;
+          border-radius: 3px;
+          font-size: 14px;
+        }
+        /* 可视化编辑区 */
+        .visual-editor {
+          background: #1e1e1e;
+          border: 1px solid #3c3c3c;
+          padding: 10px;
+          border-radius: 3px;
+          min-height: 300px;
+        }
+        /* commit 信息区 */
+        .commit-area {
+          margin-top: 10px;
+        }
+        .commit-area input[type="text"] {
+          width: 60%;
+          margin-right: 10px;
+        }
+        /* 代码预览及代码块 */
+        pre {
+          background: #1e1e1e;
+          padding: 10px;
+          border-radius: 3px;
+          overflow: auto;
+        }
+        code {
+          background: #1e1e1e;
+          padding: 2px 4px;
+          border-radius: 3px;
+        }
+        /* 文件树节点 */
+        .tree-node {
+          margin-left: 10px;
+        }
+        .node-label {
+          padding: 4px 8px;
+          border-radius: 3px;
+          cursor: pointer;
+        }
+        .node-label.selected {
+          background: #094771;
+          color: #ffffff;
         }
       `}</style>
     </div>
@@ -478,43 +519,33 @@ export default function Home({
 }
 
 /**
- * getServerSideProps
- * - 从环境变量读取 GITHUB_USER_TOKEN 与 GITHUB_ROUTE（可追加初始路径）
- * - 获取仓库信息、默认分支及完整文件树，并转换为树形结构数据
- * - 如果 GITHUB_ROUTE 格式为 "owner/repo/child/folder"，则剩余部分作为初始展开路径
+ * getServerSideProps：读取环境变量，
+ * 获取仓库基本信息、默认分支与完整文件树，同时解析初始展开目录
  */
 export async function getServerSideProps() {
   const githubUserToken = process.env.GITHUB_USER_TOKEN;
-  const githubRoute = process.env.GITHUB_ROUTE; // 格式："owner/repo" 或 "owner/repo/child/folder"
-
+  const githubRoute = process.env.GITHUB_ROUTE;
   if (!githubUserToken || !githubRoute) {
     return {
-      props: {
-        error: '环境变量 GITHUB_USER_TOKEN 或 GITHUB_ROUTE 未设置',
-      },
+      props: { error: '环境变量 GITHUB_USER_TOKEN 或 GITHUB_ROUTE 未设置' },
     };
   }
 
   const routeParts = githubRoute.split('/');
   if (routeParts.length < 2) {
     return {
-      props: {
-        error: 'GITHUB_ROUTE 格式错误，应至少为 "owner/repo"',
-      },
+      props: { error: 'GITHUB_ROUTE 格式错误，应至少为 "owner/repo"' },
     };
   }
-
   const owner = routeParts[0];
   const repo = routeParts[1];
-  const initialPath = routeParts.length > 2 ? routeParts.slice(2).join('/') : '';
-
+  const initialPath = routeParts.length > 2 ? routeParts.slice(2).join('/') : "";
   const headers = {
     Authorization: `token ${githubUserToken}`,
     Accept: 'application/vnd.github.v3+json',
   };
 
   try {
-    // 获取仓库基本信息（默认分支）
     const repoResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
     if (!repoResponse.ok) {
       const errorData = await repoResponse.json();
@@ -523,7 +554,6 @@ export async function getServerSideProps() {
     const repoData = await repoResponse.json();
     const defaultBranch = repoData.default_branch || 'main';
 
-    // 获取分支信息以获得树对象 SHA
     const branchResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/branches/${defaultBranch}`,
       { headers }
@@ -535,7 +565,6 @@ export async function getServerSideProps() {
     const branchData = await branchResponse.json();
     const treeSha = branchData.commit.commit.tree.sha;
 
-    // 获取仓库完整文件树（递归获取所有目录和文件）
     const treeResponse = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`,
       { headers }
@@ -558,8 +587,6 @@ export async function getServerSideProps() {
       },
     };
   } catch (err) {
-    return {
-      props: { error: err.message || '数据获取出现异常' },
-    };
+    return { props: { error: err.message || '数据获取出现异常' } };
   }
 }
