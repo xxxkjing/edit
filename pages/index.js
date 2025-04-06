@@ -117,7 +117,7 @@ export default function Home({
 }) {
   const [selectedPath, setSelectedPath] = useState(null);
   const [preview, setPreview] = useState('');
-  const [previewMeta, setPreviewMeta] = useState(null); // 新增存储返回的数据附加信息
+  const [previewMeta, setPreviewMeta] = useState(null); // 存储返回的附加信息
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(300);
 
@@ -180,12 +180,17 @@ export default function Home({
   const isMarkdown =
     selectedPath && selectedPath.toLowerCase().endsWith('.md');
 
-  // Markdown 代码块处理
+  // Markdown 代码块处理组件
   const markdownComponents = {
     code({ node, inline, className, children, ...props }) {
       const match = /language-(\w+)/.exec(className || '');
       return !inline && match ? (
-        <SyntaxHighlighter style={syntaxStyle} language={match[1]} PreTag="div" {...props}>
+        <SyntaxHighlighter
+          style={syntaxStyle}
+          language={match[1]}
+          PreTag="div"
+          {...props}
+        >
           {String(children).replace(/\n$/, '')}
         </SyntaxHighlighter>
       ) : (
@@ -227,22 +232,28 @@ export default function Home({
         {loadingPreview ? (
           <p>加载预览…</p>
         ) : previewMeta && previewMeta.isImage ? (
-          // 图片预览
+          // 图片预览：追加 max-width 和 max-height 适应页面
           <img
             src={`data:${previewMeta.mimeType};base64,${preview}`}
             alt="预览图片"
-            style={{ maxWidth: '100%', maxHeight: '100%' }}
+            style={{
+              maxWidth: '100%',
+              maxHeight: 'calc(100vh - 100px)',
+              objectFit: 'contain'
+            }}
           />
         ) : previewMeta && previewMeta.isBinary ? (
           // 非图片二进制文件提示
-          <div style={{ padding: '1rem', color: '#888' }}>二进制文件无法预览</div>
+          <div style={{ padding: '1rem', color: '#888' }}>
+            二进制文件无法预览
+          </div>
         ) : isMarkdown ? (
-          // Markdown 文件预览
+          // Markdown 文件预览，代码高亮处理
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {preview}
           </ReactMarkdown>
         ) : (
-          // 其他文件按纯文本预览
+          // 其他文件以纯文本预览
           <pre>{preview}</pre>
         )}
       </div>

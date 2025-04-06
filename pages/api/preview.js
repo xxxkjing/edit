@@ -9,9 +9,7 @@ export default async function handler(req, res) {
   const githubRoute = process.env.GITHUB_ROUTE;
 
   if (!githubUserToken || !githubRoute) {
-    return res
-      .status(500)
-      .json({ error: '服务器配置错误：缺少 GitHub 配置信息' });
+    return res.status(500).json({ error: '服务器配置错误：缺少 GitHub 配置信息' });
   }
 
   const [owner, repo] = githubRoute.split('/');
